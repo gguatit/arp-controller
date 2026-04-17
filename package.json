@@ -1,0 +1,12 @@
+{
+  "name": "arp-controller",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p frontend/tsconfig.json",
+    "start": "python server.py"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

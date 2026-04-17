@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "outDir": "./",
+    "rootDir": "src",
+    "strict": true,
+    "noImplicitAny": true,
+    "removeComments": true,
+    "sourceMap": false,
+    "lib": ["ES2020", "DOM"]
+  },
+  "files": ["src/app.ts"]
+}

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARP Controller</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            background: #0f0f13;
+            color: #e0e0e0;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            padding: 24px 32px;
+            border-bottom: 1px solid #2a2a4a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header h1 .icon { font-size: 28px; }
+        .header .info {
+            font-size: 13px;
+            color: #888;
+        }
+        .header .info span {
+            margin-left: 16px;
+            color: #6c9;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 32px auto;
+            padding: 0 24px;
+        }
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            align-items: center;
+        }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn-scan {
+            background: #3a7bd5;
+            color: #fff;
+        }
+        .btn-scan:hover { background: #2d6bc4; }
+        .btn-scan:disabled { background: #555; cursor: not-allowed; }
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .device-count {
+            margin-left: auto;
+            font-size: 13px;
+            color: #888;
+        }
+        .device-count span { color: #6c9; font-weight: 600; }
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            background: #1a1a24;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+        }
+        thead th {
+            background: #22223a;
+            padding: 14px 20px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #8888aa;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        tbody tr {
+            transition: background 0.15s;
+        }
+        tbody tr:hover {
+            background: #22223a;
+        }
+        tbody tr.blocked {
+            background: rgba(220, 50, 50, 0.08);
+        }
+        tbody tr.blocked:hover {
+            background: rgba(220, 50, 50, 0.14);
+        }
+        td {
+            padding: 14px 20px;
+            border-bottom: 1px solid #2a2a3a;
+            font-size: 14px;
+        }
+        .ip-cell {
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #7eb8f7;
+        }
+        .mac-cell {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            color: #aaa;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-online {
+            background: rgba(76, 175, 80, 0.15);
+            color: #6c9;
+        }
+        .status-blocked {
+            background: rgba(244, 67, 54, 0.15);
+            color: #f66;
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+        }
+        .status-online .status-dot { background: #6c9; }
+        .status-blocked .status-dot { background: #f66; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .toggle-btn {
+            padding: 7px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .toggle-btn:active { transform: scale(0.95); }
+        .toggle-block {
+            background: #dc3545;
+            color: #fff;
+        }
+        .toggle-block:hover { background: #c82333; }
+        .toggle-unblock {
+            background: #28a745;
+            color: #fff;
+        }
+        .toggle-unblock:hover { background: #218838; }
+        .toggle-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        .empty-state .emoji { font-size: 48px; margin-bottom: 16px; }
+        .empty-state p { font-size: 15px; }
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #fff;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast-success { background: #28a745; }
+        .toast-error { background: #dc3545; }
+        .toast-info { background: #3a7bd5; }
+        .warning-bar {
+            background: #332a00;
+            border: 1px solid #665200;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            color: #e0c44f;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span class="icon">⚡</span> ARP Controller</h1>
+        <div class="info">
+            <span id="localInfo">로컬: -</span>
+            <span id="gatewayInfo">게이트웨이: -</span>
+        </div>
+    </div>
+    <div class="container">
+        <div class="warning-bar">
+            ⚠️ 이 프로그램은 <strong>관리자 권한</strong>으로 실행해야 합니다. ARP 스푸핑을 통해 기기의 인터넷을 차단/해제합니다.
+        </div>
+        <div class="toolbar">
+            <button class="btn btn-scan" id="scanBtn" onclick="app.scan()">
+                네트워크 스캔
+            </button>
+            <div class="device-count">발견된 기기: <span id="deviceCount">0</span>대</div>
+        </div>
+        <table id="deviceTable">
+            <thead>
+                <tr>
+                    <th>IP 주소</th>
+                    <th>MAC 주소</th>
+                    <th>상태</th>
+                    <th>인터넷 제어</th>
+                </tr>
+            </thead>
+            <tbody id="deviceList">
+                <tr><td colspan="4" class="empty-state">
+                    <div class="emoji">🔍</div>
+                    <p>네트워크 스캔을 클릭하여 기기를 검색하세요</p>
+                </td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script src="app.js"></script>
+</body>
+</html>
