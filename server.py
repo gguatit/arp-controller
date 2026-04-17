@@ -631,42 +631,120 @@ def _enrich_device(ip: str, mac: str) -> dict:
     }
 
 
+def _ping_sweep(subnet: str):
+    net = ipaddress.ip_network(subnet, strict=False)
+    ips = [str(ip) for ip in net.hosts() if str(ip) != local_ip]
+    batch_size = 64
+
+    for i in range(0, len(ips), batch_size):
+        batch = ips[i:i + batch_size]
+        if platform.system() == "Windows":
+            for ip in batch:
+                try:
+                    subprocess.run(
+                        ["ping", "-n", "1", "-w", "500", ip],
+                        capture_output=True, timeout=2
+                    )
+                except Exception:
+                    pass
+        else:
+            targets = " ".join(batch)
+            try:
+                subprocess.run(
+                    f"ping -c 1 -W 0.5 {targets}",
+                    shell=True, capture_output=True, timeout=10
+                )
+            except Exception:
+                pass
+
+
+def _read_arp_cache() -> dict[str, str]:
+    cache: dict[str, str] = {}
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["arp", "-a"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.split("\n"):
+                line = line.strip()
+                if not line or line.startswith("Interface") or line.startswith("---"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    ip = parts[0].strip()
+                    mac = parts[1].replace("-", ":").lower()
+                    if len(mac) == 17 and mac != "ff:ff:ff:ff:ff:ff":
+                        cache[ip] = mac
+        else:
+            with open("/proc/net/arp", "r") as f:
+                for line in f:
+                    if line.startswith("IP"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        ip = parts[0]
+                        mac = parts[3].lower()
+                        if mac != "00:00:00:00:00:00" and mac != "ff:ff:ff:ff:ff:ff":
+                            cache[ip] = mac
+    except Exception:
+        pass
+    return cache
+
+
 def arp_scan():
     global scan_results
     with scan_lock:
         subnet = get_subnet()
+
+        _ping_sweep(subnet)
+        time.sleep(1)
+
         arp = ARP(pdst=subnet)
         ether = Ether(dst="ff:ff:ff:ff:ff:ff")
         packet = ether / arp
 
+        found: dict[str, str] = {}
+
         try:
             answered, _ = srp(
-                packet, timeout=3,
+                packet, timeout=5,
                 iface=interface if interface else None,
-                verbose=False
+                verbose=False,
+                retry=3,
+                inter=0.1,
             )
+            for sent, received in answered:
+                ip = received.psrc
+                mac = received.hwsrc
+                if ip != local_ip:
+                    found[ip] = mac
         except Exception as e:
             print(f"ARP scan error: {e}")
-            return scan_results
 
-        targets = []
-        for sent, received in answered:
-            ip = received.psrc
-            mac = received.hwsrc
-            if ip == local_ip:
-                continue
-            targets.append((ip, mac))
+        arp_cache = _read_arp_cache()
+        for ip, mac in arp_cache.items():
+            if ip != local_ip and ip not in found:
+                try:
+                    addr = ipaddress.ip_address(ip)
+                    if addr in ipaddress.ip_network(subnet, strict=False):
+                        found[ip] = mac
+                except ValueError:
+                    pass
+
+        if gateway_ip and gateway_ip != local_ip and gateway_mac and gateway_ip not in found:
+            found[gateway_ip] = gateway_mac
 
         results = []
         with ThreadPoolExecutor(max_workers=16) as pool:
-            futures = {pool.submit(_enrich_device, ip, mac): ip for ip, mac in targets}
+            futures = {pool.submit(_enrich_device, ip, mac): ip for ip, mac in found.items()}
             for future in as_completed(futures):
                 try:
                     results.append(future.result(timeout=10))
-                except Exception as e:
+                except Exception:
                     ip = futures[future]
                     results.append({
-                        "ip": ip, "mac": "", "blocked": ip in blocked_devices,
+                        "ip": ip, "mac": found.get(ip, ""), "blocked": ip in blocked_devices,
                         "hostname": "", "vendor": "", "os_guess": "Unknown",
                         "ttl": None, "rtt": None,
                     })
