@@ -20,6 +20,11 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
+if not os.path.isdir(FRONTEND_DIR):
+    print(f"ERROR: Frontend directory not found: {FRONTEND_DIR}")
+    print("Make sure you are running this script from the project root directory.")
+    sys.exit(1)
+
 app = Flask(__name__, static_folder=None)
 CORS(app)
 
@@ -795,9 +800,17 @@ def index():
     return send_from_directory(FRONTEND_DIR, "index.html")
 
 
-@app.route("/app.js")
-def serve_app_js():
-    return send_from_directory(FRONTEND_DIR, "app.js")
+@app.route("/<path:filename>")
+def serve_frontend(filename):
+    if filename.startswith("api/"):
+        return jsonify({"error": "Not found"}), 404
+    safe_path = os.path.normpath(filename)
+    if safe_path.startswith("..") or os.path.isabs(safe_path):
+        return jsonify({"error": "Not found"}), 404
+    full_path = os.path.join(FRONTEND_DIR, safe_path)
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory(FRONTEND_DIR, safe_path)
 
 
 @app.route("/api/scan", methods=["GET"])
