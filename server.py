@@ -612,45 +612,59 @@ def get_network_info():
     global gateway_ip, gateway_mac, local_ip, local_mac, interface
 
     if platform.system() == "Windows":
-        result = subprocess.run(
-            ["route", "print", "0.0.0.0"],
-            capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split()
-            if len(parts) >= 3 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
-                gateway_ip = parts[2]
-                break
-    else:
         try:
             result = subprocess.run(
-                ["ip", "route"],
+                ["route", "print", "0.0.0.0"],
+                capture_output=True, text=True, timeout=10
+            )
+            for line in result.stdout.strip().split("\n"):
+                parts = line.split()
+                if len(parts) >= 3 and parts[0] == "0.0.0.0" and parts[1] == "0.0.0.0":
+                    gateway_ip = parts[2]
+                    print(f"[gateway] Found via route print: {gateway_ip}")
+                    break
+        except Exception as e:
+            print(f"[gateway] route print failed: {e}")
+
+    if not gateway_ip:
+        try:
+            result = subprocess.run(
+                ["ip", "route", "show", "default"],
                 capture_output=True, text=True, timeout=10
             )
             for line in result.stdout.split("\n"):
-                if line.startswith("default"):
+                line = line.strip()
+                if line.startswith("default") or line.startswith("nexthop"):
                     parts = line.split()
-                    if len(parts) >= 3:
-                        gateway_ip = parts[2]
-                    if len(parts) > 4:
-                        interface = parts[4]
-                    break
-        except FileNotFoundError:
-            try:
-                result = subprocess.run(
-                    ["route", "-n"],
-                    capture_output=True, text=True, timeout=10
-                )
-                for line in result.stdout.split("\n"):
-                    if line.startswith("0.0.0.0") or line.startswith("default"):
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            gateway_ip = parts[1]
+                    for i, p in enumerate(parts):
+                        if p == "via" and i + 1 < len(parts):
+                            gateway_ip = parts[i + 1]
+                            print(f"[gateway] Found via ip route: {gateway_ip}")
+                            break
+                        if p == "dev" and i + 1 < len(parts):
+                            interface = parts[i + 1]
+                    if gateway_ip:
+                        break
+        except Exception as e:
+            print(f"[gateway] ip route failed: {e}")
+
+    if not gateway_ip:
+        try:
+            result = subprocess.run(
+                ["route", "-n"],
+                capture_output=True, text=True, timeout=10
+            )
+            for line in result.stdout.split("\n"):
+                parts = line.split()
+                if len(parts) >= 2 and (parts[0] == "0.0.0.0" or parts[0] == "default"):
+                    if parts[1] != "0.0.0.0" and parts[1] != "*":
+                        gateway_ip = parts[1]
+                        print(f"[gateway] Found via route -n: {gateway_ip}")
                         if len(parts) >= 8:
                             interface = parts[7]
                         break
-            except Exception:
-                pass
+        except Exception as e:
+            print(f"[gateway] route -n failed: {e}")
 
     if not gateway_ip:
         try:
@@ -662,27 +676,56 @@ def get_network_info():
                         if hex_ip and hex_ip != "00000000":
                             octets = [int(hex_ip[i:i+2], 16) for i in range(6, -1, -2)]
                             gateway_ip = ".".join(str(o) for o in octets)
-                            if len(parts) >= 8:
-                                iface_name = parts[7]
-                                if iface_name != "*":
-                                    interface = iface_name
+                            iface_name = parts[0]
+                            if iface_name and iface_name != "*":
+                                interface = iface_name
+                            print(f"[gateway] Found via /proc/net/route: {gateway_ip} iface={interface}")
                             break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[gateway] /proc/net/route failed: {e}")
 
     if not gateway_ip:
-        print("ERROR: Could not determine gateway IP. Are you connected to a network?")
-        sys.exit(1)
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 53))
+            local_ip = s.getsockname()[0]
+            s.close()
+            if local_ip and local_ip != "0.0.0.0":
+                net = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+                gw_candidate = str(net.network_address + 1)
+                gw_mac = getmacbyip(gw_candidate)
+                if gw_mac and gw_mac != "ff:ff:ff:ff:ff:ff":
+                    gateway_ip = gw_candidate
+                    print(f"[gateway] Inferred via socket connect: {gateway_ip}")
+        except Exception as e:
+            print(f"[gateway] socket inference failed: {e}")
 
-    gateway_mac = getmacbyip(gateway_ip) or "ff:ff:ff:ff:ff:ff"
+    if not gateway_ip:
+        print("WARNING: Could not determine gateway IP. Scanning will work but blocking may not function.")
+        print("Try running: ip route show default")
+    else:
+        gateway_mac = getmacbyip(gateway_ip) or "ff:ff:ff:ff:ff:ff"
 
     if interface:
         try:
             local_ip = get_if_addr(interface)
             local_mac = get_if_hwaddr(interface)
+            if local_ip and local_ip != "0.0.0.0":
+                print(f"[local] Found via interface {interface}: {local_ip}")
         except Exception:
             local_ip = ""
             local_mac = ""
+
+    if not local_ip or local_ip == "0.0.0.0":
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 53))
+            local_ip = s.getsockname()[0]
+            s.close()
+            if local_ip and local_ip != "0.0.0.0":
+                print(f"[local] Found via socket connect: {local_ip}")
+        except Exception:
+            pass
 
     if not local_ip or local_ip == "0.0.0.0":
         iface = conf.iface
@@ -697,7 +740,7 @@ def get_network_info():
             local_mac = ""
 
     if not local_ip or local_ip == "0.0.0.0":
-        wifi_interfaces = ["wlan0", "wlan1", "eth0", "usb0", "rndis0", "ncm0"]
+        wifi_interfaces = ["wlan0", "wlan1", "eth0", "usb0", "rndis0", "ncm0", "swlan0"]
         for iface_name in conf.ifaces:
             try:
                 addr = get_if_addr(iface_name)
@@ -705,6 +748,7 @@ def get_network_info():
                     local_ip = addr
                     local_mac = get_if_hwaddr(iface_name)
                     interface = iface_name
+                    print(f"[local] Found via conf.ifaces scan: {local_ip} on {iface_name}")
                     break
             except Exception:
                 continue
@@ -716,9 +760,13 @@ def get_network_info():
                         local_ip = addr
                         local_mac = get_if_hwaddr(wi)
                         interface = wi
+                        print(f"[local] Found via wifi_interfaces: {local_ip} on {wi}")
                         break
                 except Exception:
                     continue
+
+    if not local_ip or local_ip == "0.0.0.0":
+        print("WARNING: Could not determine local IP. Are you connected to a network?")
 
     print(f"Local IP: {local_ip}, MAC: {local_mac}")
     print(f"Gateway IP: {gateway_ip}, MAC: {gateway_mac}")
