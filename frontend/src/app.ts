@@ -11,6 +11,7 @@ interface Device {
 
 interface ScanResponse {
     devices: Device[];
+    scanning: boolean;
 }
 
 interface StatusResponse {
@@ -44,6 +45,7 @@ class ARPControllerApp {
     private scanning: boolean = false;
     private detailOpen: boolean = false;
     private toastTimer: ReturnType<typeof setTimeout> | null = null;
+    private pollTimer: ReturnType<typeof setInterval> | null = null;
 
     private escapeHtml(str: string): string {
         const div = document.createElement("div");
@@ -102,14 +104,38 @@ class ARPControllerApp {
             const data = await this.fetchJSON<ScanResponse>("/api/scan");
             this.devices = data.devices;
             this.render();
-            this.showToast(`스캔 완료: ${this.devices.length}대 발견`, "success");
+            if (data.scanning) {
+                this.startPolling();
+            } else {
+                this.showToast(`스캔 완료: ${this.devices.length}대 발견`, "success");
+            }
         } catch (err) {
             this.showToast(`스캔 실패: ${(err as Error).message}`, "error");
-        } finally {
             this.scanning = false;
             btn.disabled = false;
             btn.textContent = "네트워크 스캔";
         }
+    }
+
+    private startPolling(): void {
+        if (this.pollTimer) clearInterval(this.pollTimer);
+        this.pollTimer = setInterval(async () => {
+            try {
+                const data = await this.fetchJSON<ScanResponse>("/api/devices");
+                this.devices = data.devices;
+                this.render();
+                if (!data.scanning) {
+                    if (this.pollTimer) clearInterval(this.pollTimer);
+                    this.pollTimer = null;
+                    this.scanning = false;
+                    const btn = document.getElementById("scanBtn") as HTMLButtonElement;
+                    btn.disabled = false;
+                    btn.textContent = "네트워크 스캔";
+                    this.showToast(`스캔 완료: ${this.devices.length}대 발견`, "success");
+                }
+            } catch {
+            }
+        }, 1500);
     }
 
     async block(ip: string): Promise<void> {
@@ -248,7 +274,7 @@ class ARPControllerApp {
 
         tbody.innerHTML = this.devices.map(d => `
             <tr class="${d.blocked ? "blocked" : ""}">
-                <td class="ip-cell" onclick="app.showDeviceDetail('${this.escapeHtml(d.ip)}')">${this.escapeHtml(d.ip)}${d.hostname ? `<span class="hostname-label">${this.escapeHtml(d.hostname)}</span>` : ""}</td>
+                <td class="ip-cell" onclick="app.showDeviceDetail('${this.escapeHtml(d.ip)}')">${this.escapeHtml(d.ip)}${d.hostname ? `<span class="hostname-label">${this.escapeHtml(d.hostname)}</span>` : ""}${d.os_guess === "Scanning..." ? '<span class="os-pending">상세 검색 중...</span>' : ""}</td>
                 <td class="mac-cell">${this.escapeHtml(d.mac)}</td>
                 <td>
                     <span class="status-badge ${d.blocked ? "status-blocked" : "status-online"}">

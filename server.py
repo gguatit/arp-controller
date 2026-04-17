@@ -34,6 +34,7 @@ stop_events: dict[str, threading.Event] = {}
 scan_results: list[dict] = []
 scan_lock = threading.Lock()
 block_lock = threading.Lock()
+scan_in_progress: bool = False
 gateway_ip: str = ""
 gateway_mac: str = ""
 local_ip: str = ""
@@ -692,11 +693,10 @@ def _read_arp_cache() -> dict[str, str]:
     return cache
 
 
-def arp_scan():
-    global scan_results
-    with scan_lock:
-        subnet = get_subnet()
+def _background_enrich(found: dict[str, str], subnet: str):
+    global scan_in_progress, scan_results
 
+    try:
         _ping_sweep(subnet)
         time.sleep(1)
 
@@ -704,15 +704,11 @@ def arp_scan():
         ether = Ether(dst="ff:ff:ff:ff:ff:ff")
         packet = ether / arp
 
-        found: dict[str, str] = {}
-
         try:
             answered, _ = srp(
                 packet, timeout=5,
                 iface=interface if interface else None,
-                verbose=False,
-                retry=3,
-                inter=0.1,
+                verbose=False, retry=3, inter=0.1,
             )
             for sent, received in answered:
                 ip = received.psrc
@@ -729,28 +725,87 @@ def arp_scan():
                     addr = ipaddress.ip_address(ip)
                     if addr in ipaddress.ip_network(subnet, strict=False):
                         found[ip] = mac
+                        new_dev = {
+                            "ip": ip, "mac": mac, "blocked": ip in blocked_devices,
+                            "hostname": "", "vendor": _get_mac_vendor(mac),
+                            "os_guess": "Unknown", "ttl": None, "rtt": None,
+                        }
+                        scan_results.append(new_dev)
                 except ValueError:
                     pass
 
         if gateway_ip and gateway_ip != local_ip and gateway_mac and gateway_ip not in found:
             found[gateway_ip] = gateway_mac
+            if not any(d["ip"] == gateway_ip for d in scan_results):
+                scan_results.append({
+                    "ip": gateway_ip, "mac": gateway_mac, "blocked": False,
+                    "hostname": "", "vendor": _get_mac_vendor(gateway_mac),
+                    "os_guess": "Gateway / Router", "ttl": None, "rtt": None,
+                })
 
-        results = []
         with ThreadPoolExecutor(max_workers=16) as pool:
-            futures = {pool.submit(_enrich_device, ip, mac): ip for ip, mac in found.items()}
-            for future in as_completed(futures):
-                try:
-                    results.append(future.result(timeout=10))
-                except Exception:
-                    ip = futures[future]
-                    results.append({
-                        "ip": ip, "mac": found.get(ip, ""), "blocked": ip in blocked_devices,
-                        "hostname": "", "vendor": "", "os_guess": "Unknown",
-                        "ttl": None, "rtt": None,
-                    })
+            futures = {}
+            for ip, mac in found.items():
+                dev = next((d for d in scan_results if d["ip"] == ip), None)
+                if dev and not dev.get("hostname"):
+                    futures[pool.submit(_enrich_device, ip, mac)] = ip
 
-        scan_results = results
-        return results
+            for future in as_completed(futures):
+                ip = futures[future]
+                try:
+                    enriched = future.result(timeout=10)
+                    for i, d in enumerate(scan_results):
+                        if d["ip"] == ip:
+                            scan_results[i] = enriched
+                            break
+                except Exception:
+                    pass
+    finally:
+        scan_in_progress = False
+
+
+def arp_scan():
+    global scan_results, scan_in_progress
+    with scan_lock:
+        subnet = get_subnet()
+        scan_in_progress = True
+
+        found: dict[str, str] = {}
+
+        try:
+            answered, _ = srp(
+                Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=subnet),
+                timeout=2,
+                iface=interface if interface else None,
+                verbose=False,
+            )
+            for sent, received in answered:
+                ip = received.psrc
+                mac = received.hwsrc
+                if ip != local_ip:
+                    found[ip] = mac
+        except Exception as e:
+            print(f"Quick ARP scan error: {e}")
+
+        if gateway_ip and gateway_ip != local_ip and gateway_mac and gateway_ip not in found:
+            found[gateway_ip] = gateway_mac
+
+        scan_results = []
+        for ip, mac in found.items():
+            scan_results.append({
+                "ip": ip, "mac": mac, "blocked": ip in blocked_devices,
+                "hostname": "", "vendor": _get_mac_vendor(mac),
+                "os_guess": "Scanning...", "ttl": None, "rtt": None,
+            })
+
+        t = threading.Thread(
+            target=_background_enrich,
+            args=(found, subnet),
+            daemon=True,
+        )
+        t.start()
+
+        return scan_results
 
 
 def _check_ip_forwarding():
@@ -894,14 +949,14 @@ def serve_frontend(filename):
 @app.route("/api/scan", methods=["GET"])
 def api_scan():
     results = arp_scan()
-    return jsonify({"devices": results})
+    return jsonify({"devices": results, "scanning": scan_in_progress})
 
 
 @app.route("/api/devices", methods=["GET"])
 def api_devices():
     for dev in scan_results:
         dev["blocked"] = dev["ip"] in blocked_devices
-    return jsonify({"devices": scan_results})
+    return jsonify({"devices": scan_results, "scanning": scan_in_progress})
 
 
 @app.route("/api/block", methods=["POST"])
