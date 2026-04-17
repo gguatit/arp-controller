@@ -58,14 +58,6 @@
             background: #0d0d0d;
             border-radius: 50%;
         }
-        .header .info {
-            font-size: 12px;
-            color: #666;
-        }
-        .header .info span {
-            margin-left: 16px;
-            color: #999;
-        }
         .container {
             max-width: 1100px;
             margin: 32px auto;
@@ -490,14 +482,14 @@
         <div class="my-pc-card" id="myPcCard">
             <div class="card-title">내 컴퓨터</div>
             <div class="card-label">IP 주소</div>
-            <div class="card-value clickable" id="myIp" onclick="app.showDeviceDetail(this.textContent)">-</div>
+            <div class="card-value clickable" id="myIp" onclick="if(this.textContent!=='-')app.showDeviceDetail(this.textContent)">-</div>
             <div></div>
             <div class="card-label">MAC 주소</div>
             <div class="card-value mac" id="myMac">-</div>
             <div></div>
             <div class="gw-section">
                 <div class="card-label">게이트웨이 IP</div>
-                <div class="card-value clickable" id="myGwIp" onclick="app.showDeviceDetail(this.textContent)">-</div>
+                <div class="card-value clickable" id="myGwIp" onclick="if(this.textContent!=='-')app.showDeviceDetail(this.textContent)">-</div>
                 <div></div>
                 <div class="card-label">게이트웨이 MAC</div>
                 <div class="card-value mac" id="myGwMac">-</div>

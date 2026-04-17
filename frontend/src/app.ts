@@ -3,6 +3,10 @@ interface Device {
     mac: string;
     blocked: boolean;
     hostname: string;
+    vendor: string;
+    os_guess: string;
+    ttl: number | null;
+    rtt: number | null;
 }
 
 interface ScanResponse {
@@ -39,6 +43,7 @@ class ARPControllerApp {
     private devices: Device[] = [];
     private scanning: boolean = false;
     private detailOpen: boolean = false;
+    private toastTimer: ReturnType<typeof setTimeout> | null = null;
 
     private escapeHtml(str: string): string {
         const div = document.createElement("div");
@@ -263,10 +268,12 @@ class ARPControllerApp {
 
     private showToast(message: string, type: "success" | "error" | "info"): void {
         const toast = document.getElementById("toast")!;
+        if (this.toastTimer) clearTimeout(this.toastTimer);
         toast.textContent = message;
         toast.className = `toast toast-${type} show`;
-        setTimeout(() => {
+        this.toastTimer = setTimeout(() => {
             toast.className = "toast";
+            this.toastTimer = null;
         }, 3000);
     }
 }

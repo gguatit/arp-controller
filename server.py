@@ -6,8 +6,8 @@ import threading
 import time
 import atexit
 import ipaddress
-import json
 import socket
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
@@ -33,7 +33,7 @@ gateway_ip: str = ""
 gateway_mac: str = ""
 local_ip: str = ""
 local_mac: str = ""
-interface = None
+interface = None  # type: ignore[assignment]
 original_ip_forward: bool = False
 
 OUI_TABLE: dict[str, str] = {
@@ -135,7 +135,7 @@ OUI_TABLE: dict[str, str] = {
     "6C3B58": "Dell", "6CF254": "Dell", "7081EB": "Dell", "70F1D0": "Dell",
     "78288A": "Dell", "7C2AEB": "Dell", "7CAABC": "Dell", "80A36E": "Dell",
     "843DA4": "Dell", "88539E": "Dell", "8C54FD": "Dell", "904CEB": "Dell",
-    "9482B0": "Dell", "98BE943": "Dell", "9C7EBD": "Dell", "9CD6DE": "Dell",
+    "9482B0": "Dell",     "98BE94": "Dell", "9C7EBD": "Dell", "9CD6DE": "Dell",
     "A00363": "Dell", "A0D3B7": "Dell", "A42B8C": "Dell", "A870CC": "Dell",
     "AC7E3A": "Dell", "AC9225": "Dell", "B0D5CC": "Dell", "B4A0E0": "Dell",
     "B8AC6F": "Dell", "BC305B": "Dell", "C0E5CA": "Dell", "C4401E": "Dell",
@@ -161,7 +161,7 @@ OUI_TABLE: dict[str, str] = {
     "8C3B4D": "Samsung", "8CA6DF": "Samsung", "9022E3": "Samsung", "906F46": "Samsung",
     "90B6AA": "Samsung", "94404C": "Samsung", "945678": "Samsung", "94B872": "Samsung",
     "9848BA": "Samsung", "98D0C0": "Samsung", "9C3AAF": "Samsung", "9C5CF2": "Samsung",
-    "A022E3": "Samsung", "A0682C": "Samsung", "A4104BB": "Samsung", "A4C299": "Samsung",
+    "A022E3": "Samsung", "A0682C": "Samsung",     "A4104B": "Samsung", "A4C299": "Samsung",
     "A4DB30": "Samsung", "A816A1": "Samsung", "AC1C30": "Samsung", "AC9E17": "Samsung",
     "B00743": "Samsung", "B0C4E7": "Samsung", "B49842": "Samsung", "B4F0AB": "Samsung",
     "B8D9CD": "Samsung", "BC0B38": "Samsung", "BC7C88": "Samsung", "C03F5E": "Samsung",
@@ -292,14 +292,14 @@ OUI_TABLE: dict[str, str] = {
     "00C04B": "Cisco", "00D058": "Cisco", "00D0C0": "Cisco", "00D0D7": "Cisco",
     "00D0E6": "Cisco", "00E016": "Cisco", "00E01E": "Cisco", "00E0F7": "Cisco",
     "00E0FE": "Cisco", "00E184": "Cisco", "00E1B8": "Cisco", "00EE02": "Cisco",
-    "02C2C2": "Cisco", "02F3C8": "Cisco", "0C1D": "Cisco",
+    "02C2C2": "Cisco", "02F3C8": "Cisco",     "02F3C8": "Cisco",
     "1C1DE1": "Cisco", "1C1DE2": "Cisco", "1C1DE3": "Cisco", "1C1DE4": "Cisco",
     "1C1DE5": "Cisco", "1C1DE6": "Cisco", "1C1DE7": "Cisco", "1C1DE8": "Cisco",
     "1C1DE9": "Cisco", "1C1DEA": "Cisco", "1C1DEB": "Cisco", "1C1DEC": "Cisco",
     "1C1DED": "Cisco", "1C1DEE": "Cisco", "1C1DEF": "Cisco", "1C1DF0": "Cisco",
     "249770": "Cisco", "30E4A0": "Cisco", "34C871": "Cisco", "3C6AD0": "Cisco",
     "44D3CA": "Cisco", "48C9A1": "Cisco", "5057A8": "Cisco", "547856": "Cisco",
-    "58BF255": "Cisco", "5871AC": "Cisco", "5C9960": "Cisco", "60F129": "Cisco",
+    "58BF25": "Cisco", "5871AC": "Cisco", "5C9960": "Cisco", "60F129": "Cisco",
     "64D48C": "Cisco", "68C849": "Cisco", "6C41CC": "Cisco", "706D5D": "Cisco",
     "78AC14": "Cisco", "7CBB3A": "Cisco", "80A2E8": "Cisco", "84B542": "Cisco",
     "881F48": "Cisco", "8C1645": "Cisco", "90E2FB": "Cisco", "9C8A62": "Cisco",
@@ -610,6 +610,22 @@ def get_subnet():
     return "192.168.0.0/24"
 
 
+def _enrich_device(ip: str, mac: str) -> dict:
+    ttl, rtt = _ping_once(ip)
+    hostname = _resolve_hostname(ip)
+    vendor = _get_mac_vendor(mac)
+    return {
+        "ip": ip,
+        "mac": mac,
+        "blocked": ip in blocked_devices,
+        "hostname": hostname,
+        "vendor": vendor,
+        "os_guess": _guess_os_from_ttl(ttl),
+        "ttl": ttl,
+        "rtt": rtt,
+    }
+
+
 def arp_scan():
     global scan_results
     with scan_lock:
@@ -628,27 +644,27 @@ def arp_scan():
             print(f"ARP scan error: {e}")
             return scan_results
 
-        results = []
+        targets = []
         for sent, received in answered:
             ip = received.psrc
             mac = received.hwsrc
             if ip == local_ip:
                 continue
+            targets.append((ip, mac))
 
-            ttl, rtt = _ping_once(ip)
-            hostname = _resolve_hostname(ip)
-            vendor = _get_mac_vendor(mac)
-
-            results.append({
-                "ip": ip,
-                "mac": mac,
-                "blocked": ip in blocked_devices,
-                "hostname": hostname,
-                "vendor": vendor,
-                "os_guess": _guess_os_from_ttl(ttl),
-                "ttl": ttl,
-                "rtt": rtt,
-            })
+        results = []
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            futures = {pool.submit(_enrich_device, ip, mac): ip for ip, mac in targets}
+            for future in as_completed(futures):
+                try:
+                    results.append(future.result(timeout=10))
+                except Exception as e:
+                    ip = futures[future]
+                    results.append({
+                        "ip": ip, "mac": "", "blocked": ip in blocked_devices,
+                        "hostname": "", "vendor": "", "os_guess": "Unknown",
+                        "ttl": None, "rtt": None,
+                    })
 
         scan_results = results
         return results
@@ -905,10 +921,15 @@ def api_device_detail():
                 "blocked": True,
                 "duration": time.time() - blocked_devices[target_ip]["blocked_at"],
             }
+        gw_hostname = ""
+        for dev in scan_results:
+            if dev["ip"] == target_ip:
+                gw_hostname = dev.get("hostname", "")
+                break
         return jsonify({
             "ip": target_ip,
             "mac": gateway_mac,
-            "hostname": _resolve_hostname(target_ip),
+            "hostname": gw_hostname,
             "vendor": _get_mac_vendor(gateway_mac),
             "os_guess": _guess_os_from_ttl(None),
             "ttl": None,
