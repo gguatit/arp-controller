@@ -596,7 +596,14 @@ def _is_admin():
             import ctypes
             return ctypes.windll.shell32.IsUserAnAdmin() != 0
         else:
-            return os.geteuid() == 0
+            try:
+                return os.geteuid() == 0
+            except AttributeError:
+                result = subprocess.run(
+                    ["id", "-u"],
+                    capture_output=True, text=True, timeout=3
+                )
+                return result.stdout.strip() == "0"
     except Exception:
         return False
 
@@ -615,17 +622,53 @@ def get_network_info():
                 gateway_ip = parts[2]
                 break
     else:
-        result = subprocess.run(
-            ["ip", "route"],
-            capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.split("\n"):
-            if line.startswith("default"):
-                parts = line.split()
-                gateway_ip = parts[2]
-                if len(parts) > 4:
-                    interface = parts[4]
-                break
+        try:
+            result = subprocess.run(
+                ["ip", "route"],
+                capture_output=True, text=True, timeout=10
+            )
+            for line in result.stdout.split("\n"):
+                if line.startswith("default"):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        gateway_ip = parts[2]
+                    if len(parts) > 4:
+                        interface = parts[4]
+                    break
+        except FileNotFoundError:
+            try:
+                result = subprocess.run(
+                    ["route", "-n"],
+                    capture_output=True, text=True, timeout=10
+                )
+                for line in result.stdout.split("\n"):
+                    if line.startswith("0.0.0.0") or line.startswith("default"):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            gateway_ip = parts[1]
+                        if len(parts) >= 8:
+                            interface = parts[7]
+                        break
+            except Exception:
+                pass
+
+    if not gateway_ip:
+        try:
+            with open("/proc/net/route", "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 3 and parts[1] == "00000000":
+                        hex_ip = parts[2]
+                        if hex_ip and hex_ip != "00000000":
+                            octets = [int(hex_ip[i:i+2], 16) for i in range(6, -1, -2)]
+                            gateway_ip = ".".join(str(o) for o in octets)
+                            if len(parts) >= 8:
+                                iface_name = parts[7]
+                                if iface_name != "*":
+                                    interface = iface_name
+                            break
+        except Exception:
+            pass
 
     if not gateway_ip:
         print("ERROR: Could not determine gateway IP. Are you connected to a network?")
@@ -633,18 +676,28 @@ def get_network_info():
 
     gateway_mac = getmacbyip(gateway_ip) or "ff:ff:ff:ff:ff:ff"
 
-    iface = conf.iface
-    interface = iface
-    try:
-        local_ip = get_if_addr(iface)
-    except Exception:
-        local_ip = ""
-    try:
-        local_mac = get_if_hwaddr(iface)
-    except Exception:
-        local_mac = ""
+    if interface:
+        try:
+            local_ip = get_if_addr(interface)
+            local_mac = get_if_hwaddr(interface)
+        except Exception:
+            local_ip = ""
+            local_mac = ""
 
     if not local_ip or local_ip == "0.0.0.0":
+        iface = conf.iface
+        interface = iface
+        try:
+            local_ip = get_if_addr(iface)
+        except Exception:
+            local_ip = ""
+        try:
+            local_mac = get_if_hwaddr(iface)
+        except Exception:
+            local_mac = ""
+
+    if not local_ip or local_ip == "0.0.0.0":
+        wifi_interfaces = ["wlan0", "wlan1", "eth0", "usb0", "rndis0", "ncm0"]
         for iface_name in conf.ifaces:
             try:
                 addr = get_if_addr(iface_name)
@@ -655,6 +708,17 @@ def get_network_info():
                     break
             except Exception:
                 continue
+        if not local_ip or local_ip == "0.0.0.0":
+            for wi in wifi_interfaces:
+                try:
+                    addr = get_if_addr(wi)
+                    if addr and addr != "0.0.0.0":
+                        local_ip = addr
+                        local_mac = get_if_hwaddr(wi)
+                        interface = wi
+                        break
+                except Exception:
+                    continue
 
     print(f"Local IP: {local_ip}, MAC: {local_mac}")
     print(f"Gateway IP: {gateway_ip}, MAC: {gateway_mac}")
