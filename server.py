@@ -515,10 +515,28 @@ def _ping_once(target_ip: str) -> tuple[int | None, float | None]:
 def _resolve_hostname(ip: str) -> str:
     try:
         name, _, _ = socket.gethostbyaddr(ip)
-        return name
+        if name and name != ip:
+            return name
     except Exception:
         pass
+
     if platform.system() == "Windows":
+        try:
+            result = subprocess.run(
+                ["ping", "-a", "-n", "1", "-w", "500", ip],
+                capture_output=True, text=True, timeout=3
+            )
+            first_line = result.stdout.split("\n")[0] if result.stdout else ""
+            if "Pinging" in first_line or "Pinging" in first_line.lower():
+                parts = first_line.replace("[", " ").replace("]", " ").split()
+                for i, p in enumerate(parts):
+                    if p.lower() == "pinging" and i + 1 < len(parts):
+                        candidate = parts[i + 1]
+                        if candidate != ip and not candidate.startswith("("):
+                            return candidate
+        except Exception:
+            pass
+
         try:
             result = subprocess.run(
                 ["nbtstat", "-A", ip],
@@ -531,6 +549,44 @@ def _resolve_hostname(ip: str) -> str:
                         return parts[0]
         except Exception:
             pass
+    else:
+        try:
+            result = subprocess.run(
+                ["avahi-resolve", "-a", ip],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    name = parts[1]
+                    if name.endswith(".local"):
+                        name = name[:-6]
+                    if name and name != ip:
+                        return name
+        except Exception:
+            pass
+
+    try:
+        name = socket.getnameinfo((ip, 0), socket.NI_NAMEREQD)
+        if name and name[0] and name[0] != ip:
+            return name[0]
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            ["arp", "-a"] if platform.system() == "Windows" else ["ip", "neigh", "show", ip],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.split("\n"):
+            if ip in line:
+                if platform.system() == "Windows":
+                    match = line.strip().split()
+                    if len(match) >= 3 and match[2] != ip and not match[2].startswith("-"):
+                        return match[2]
+    except Exception:
+        pass
+
     return ""
 
 
@@ -616,9 +672,45 @@ def get_subnet():
     return "192.168.0.0/24"
 
 
+def _resolve_mdns(ip: str) -> str:
+    if platform.system() == "Windows":
+        try:
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 f"Resolve-DnsName -Name {ip} -DnsOnly -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty NameHost"],
+                capture_output=True, text=True, timeout=3
+            )
+            name = result.stdout.strip()
+            if name and name != ip:
+                if name.endswith(".local"):
+                    name = name[:-6]
+                return name
+        except Exception:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                ["avahi-resolve", "-a", ip],
+                capture_output=True, text=True, timeout=3
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    name = parts[1]
+                    if name.endswith(".local"):
+                        name = name[:-6]
+                    if name and name != ip:
+                        return name
+        except Exception:
+            pass
+    return ""
+
+
 def _enrich_device(ip: str, mac: str) -> dict:
     ttl, rtt = _ping_once(ip)
     hostname = _resolve_hostname(ip)
+    if not hostname:
+        hostname = _resolve_mdns(ip)
     vendor = _get_mac_vendor(mac)
     return {
         "ip": ip,
