@@ -4,38 +4,67 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ARP Controller</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', -apple-system, sans-serif;
-            background: #0f0f13;
-            color: #e0e0e0;
+            font-family: 'JetBrains Mono', monospace;
+            background: #0d0d0d;
+            color: #b0b0b0;
             min-height: 100vh;
         }
         .header {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: #141414;
             padding: 24px 32px;
-            border-bottom: 1px solid #2a2a4a;
+            border-bottom: 1px solid #262626;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            color: #fff;
+            font-size: 22px;
+            font-weight: 700;
+            color: #e0e0e0;
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        .header h1 .icon { font-size: 28px; }
+        .header h1 .icon {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            background: #666;
+            position: relative;
+        }
+        .header h1 .icon::before {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 3px;
+            width: 6px;
+            height: 6px;
+            background: #0d0d0d;
+            border-radius: 50%;
+        }
+        .header h1 .icon::after {
+            content: '';
+            position: absolute;
+            top: 4px;
+            right: 3px;
+            width: 6px;
+            height: 6px;
+            background: #0d0d0d;
+            border-radius: 50%;
+        }
         .header .info {
-            font-size: 13px;
-            color: #888;
+            font-size: 12px;
+            color: #666;
         }
         .header .info span {
             margin-left: 16px;
-            color: #6c9;
+            color: #999;
         }
         .container {
             max-width: 1100px;
@@ -50,26 +79,27 @@
         }
         .btn {
             padding: 10px 24px;
-            border: none;
-            border-radius: 8px;
+            border: 1px solid #333;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
             transition: all 0.2s;
         }
         .btn:active { transform: scale(0.97); }
         .btn-scan {
-            background: #3a7bd5;
-            color: #fff;
+            background: #1a1a1a;
+            color: #b0b0b0;
         }
-        .btn-scan:hover { background: #2d6bc4; }
-        .btn-scan:disabled { background: #555; cursor: not-allowed; }
+        .btn-scan:hover { background: #262626; color: #ccc; }
+        .btn-scan:disabled { background: #111; color: #444; cursor: not-allowed; border-color: #222; }
         .spinner {
             display: inline-block;
             width: 14px;
             height: 14px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: #fff;
+            border: 2px solid #333;
+            border-top-color: #888;
             border-radius: 50%;
             animation: spin 0.6s linear infinite;
             vertical-align: middle;
@@ -78,157 +108,405 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         .device-count {
             margin-left: auto;
-            font-size: 13px;
-            color: #888;
+            font-size: 12px;
+            color: #555;
         }
-        .device-count span { color: #6c9; font-weight: 600; }
+        .device-count span { color: #999; font-weight: 600; }
         table {
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            background: #1a1a24;
-            border-radius: 12px;
+            background: #111;
+            border-radius: 4px;
             overflow: hidden;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+            border: 1px solid #222;
         }
         thead th {
-            background: #22223a;
+            background: #1a1a1a;
             padding: 14px 20px;
             text-align: left;
             font-weight: 600;
-            font-size: 13px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #8888aa;
-            border-bottom: 1px solid #2a2a4a;
+            letter-spacing: 1px;
+            color: #555;
+            border-bottom: 1px solid #222;
         }
         tbody tr {
             transition: background 0.15s;
         }
         tbody tr:hover {
-            background: #22223a;
+            background: #1a1a1a;
         }
         tbody tr.blocked {
-            background: rgba(220, 50, 50, 0.08);
+            background: rgba(255, 255, 255, 0.02);
         }
         tbody tr.blocked:hover {
-            background: rgba(220, 50, 50, 0.14);
+            background: rgba(255, 255, 255, 0.04);
         }
         td {
             padding: 14px 20px;
-            border-bottom: 1px solid #2a2a3a;
-            font-size: 14px;
-        }
-        .ip-cell {
-            font-family: 'Consolas', 'Monaco', monospace;
-            color: #7eb8f7;
+            border-bottom: 1px solid #1a1a1a;
+            font-size: 13px;
         }
         .mac-cell {
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 12px;
-            color: #aaa;
+            font-size: 11px;
+            color: #666;
         }
         .status-badge {
             display: inline-flex;
             align-items: center;
             gap: 6px;
             padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
+            border-radius: 3px;
+            font-size: 11px;
             font-weight: 500;
         }
         .status-online {
-            background: rgba(76, 175, 80, 0.15);
-            color: #6c9;
+            background: rgba(255, 255, 255, 0.06);
+            color: #999;
         }
         .status-blocked {
-            background: rgba(244, 67, 54, 0.15);
-            color: #f66;
+            background: rgba(255, 255, 255, 0.03);
+            color: #666;
         }
         .status-dot {
-            width: 7px;
-            height: 7px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
         }
-        .status-online .status-dot { background: #6c9; }
-        .status-blocked .status-dot { background: #f66; animation: pulse 1.5s infinite; }
+        .status-online .status-dot { background: #777; }
+        .status-blocked .status-dot { background: #444; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         .toggle-btn {
-            padding: 7px 20px;
-            border: none;
-            border-radius: 6px;
+            padding: 6px 16px;
+            border: 1px solid #333;
+            border-radius: 3px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
             transition: all 0.2s;
         }
         .toggle-btn:active { transform: scale(0.95); }
         .toggle-block {
-            background: #dc3545;
-            color: #fff;
+            background: #1a1a1a;
+            color: #888;
         }
-        .toggle-block:hover { background: #c82333; }
+        .toggle-block:hover { background: #262626; color: #aaa; }
         .toggle-unblock {
-            background: #28a745;
-            color: #fff;
+            background: #1a1a1a;
+            color: #888;
         }
-        .toggle-unblock:hover { background: #218838; }
+        .toggle-unblock:hover { background: #262626; color: #aaa; }
         .toggle-btn:disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             cursor: not-allowed;
         }
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: #666;
+            color: #444;
         }
-        .empty-state .emoji { font-size: 48px; margin-bottom: 16px; }
-        .empty-state p { font-size: 15px; }
+        .empty-state .icon-placeholder {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 16px;
+            border: 2px solid #333;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .empty-state .icon-placeholder::before {
+            content: '';
+            width: 14px;
+            height: 14px;
+            border: 2px solid #444;
+            border-radius: 50%;
+        }
+        .empty-state p { font-size: 13px; }
         .toast {
             position: fixed;
             bottom: 24px;
             right: 24px;
             padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #b0b0b0;
             opacity: 0;
             transform: translateY(10px);
             transition: all 0.3s;
             z-index: 1000;
+            border: 1px solid #333;
         }
         .toast.show {
             opacity: 1;
             transform: translateY(0);
         }
-        .toast-success { background: #28a745; }
-        .toast-error { background: #dc3545; }
-        .toast-info { background: #3a7bd5; }
+        .toast-success { background: #1a1a1a; border-color: #444; }
+        .toast-error { background: #1a1a1a; border-color: #555; }
+        .toast-info { background: #1a1a1a; border-color: #333; }
         .warning-bar {
-            background: #332a00;
-            border: 1px solid #665200;
-            border-radius: 8px;
+            background: #141414;
+            border: 1px solid #333;
+            border-radius: 4px;
             padding: 12px 20px;
             margin-bottom: 20px;
-            font-size: 13px;
-            color: #e0c44f;
+            font-size: 12px;
+            color: #888;
             display: flex;
             align-items: center;
             gap: 8px;
+        }
+        .warning-bar .warn-icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #666;
+            border-radius: 50%;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .warning-bar .warn-icon::before {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 4px;
+            width: 4px;
+            height: 4px;
+            background: #666;
+            border-radius: 50%;
+        }
+        .warning-bar .warn-icon::after {
+            content: '';
+            position: absolute;
+            bottom: 2px;
+            left: 5px;
+            width: 2px;
+            height: 5px;
+            background: #666;
+        }
+        .my-pc-card {
+            background: #141414;
+            border: 2px solid #444;
+            border-radius: 6px;
+            padding: 20px 28px;
+            margin-bottom: 24px;
+            display: grid;
+            grid-template-columns: auto 1fr 1fr;
+            gap: 8px 32px;
+            align-items: center;
+        }
+        .my-pc-card .card-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #555;
+            font-weight: 600;
+        }
+        .my-pc-card .card-value {
+            font-size: 15px;
+            color: #e0e0e0;
+            font-weight: 600;
+        }
+        .my-pc-card .card-value.mac {
+            font-size: 13px;
+            color: #999;
+            font-weight: 400;
+        }
+        .my-pc-card .card-title {
+            grid-column: 1 / -1;
+            font-size: 14px;
+            font-weight: 700;
+            color: #e0e0e0;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .my-pc-card .card-value.clickable {
+            cursor: pointer;
+            border-bottom: 1px dashed #555;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .my-pc-card .card-value.clickable:hover {
+            color: #fff;
+            border-color: #888;
+        }
+        .my-pc-card .card-title::before {
+            content: '';
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #666;
+            border-radius: 2px;
+        }
+        .my-pc-card .card-title::after {
+            content: 'THIS DEVICE';
+            font-size: 9px;
+            letter-spacing: 2px;
+            color: #666;
+            font-weight: 500;
+            margin-left: auto;
+        }
+        .my-pc-card .gw-section {
+            grid-column: 1 / -1;
+            border-top: 1px solid #222;
+            padding-top: 12px;
+            margin-top: 4px;
+            display: grid;
+            grid-template-columns: auto 1fr 1fr;
+            gap: 8px 32px;
+            align-items: center;
+        }
+        .ip-cell {
+            color: #c0c0c0;
+            cursor: pointer;
+            border-bottom: 1px dashed #555;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .hostname-label {
+            display: inline-block;
+            margin-left: 10px;
+            font-size: 11px;
+            color: #555;
+            font-weight: 400;
+            border-bottom: none;
+        }
+        .ip-cell:hover {
+            color: #e0e0e0;
+            border-color: #888;
+        }
+        .detail-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 900;
+            opacity: 0;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+        .detail-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .detail-panel {
+            position: fixed;
+            top: 0;
+            right: -480px;
+            width: 460px;
+            height: 100vh;
+            background: #111;
+            border-left: 1px solid #333;
+            z-index: 950;
+            transition: right 0.25s ease;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .detail-panel.active {
+            right: 0;
+        }
+        .detail-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #222;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .detail-header h2 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+        }
+        .detail-close {
+            background: none;
+            border: 1px solid #333;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.2s;
+        }
+        .detail-close:hover {
+            background: #222;
+            color: #ccc;
+        }
+        .detail-body {
+            padding: 24px;
+            flex: 1;
+        }
+        .detail-row {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 4px 16px;
+            padding: 12px 0;
+            border-bottom: 1px solid #1a1a1a;
+            align-items: baseline;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-key {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: #555;
+            font-weight: 600;
+        }
+        .detail-val {
+            font-size: 13px;
+            color: #b0b0b0;
+            word-break: break-all;
+        }
+        .detail-val.highlight {
+            color: #e0e0e0;
+            font-weight: 600;
+        }
+        .detail-val.mono {
+            font-size: 12px;
+            color: #888;
+        }
+        .detail-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+        .detail-spinner .spinner {
+            width: 24px;
+            height: 24px;
+            border-width: 3px;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1><span class="icon">⚡</span> ARP Controller</h1>
-        <div class="info">
-            <span id="localInfo">로컬: -</span>
-            <span id="gatewayInfo">게이트웨이: -</span>
-        </div>
+        <h1><span class="icon"></span>ARP Controller</h1>
     </div>
     <div class="container">
+        <div class="my-pc-card" id="myPcCard">
+            <div class="card-title">내 컴퓨터</div>
+            <div class="card-label">IP 주소</div>
+            <div class="card-value clickable" id="myIp" onclick="app.showDeviceDetail(this.textContent)">-</div>
+            <div></div>
+            <div class="card-label">MAC 주소</div>
+            <div class="card-value mac" id="myMac">-</div>
+            <div></div>
+            <div class="gw-section">
+                <div class="card-label">게이트웨이 IP</div>
+                <div class="card-value clickable" id="myGwIp" onclick="app.showDeviceDetail(this.textContent)">-</div>
+                <div></div>
+                <div class="card-label">게이트웨이 MAC</div>
+                <div class="card-value mac" id="myGwMac">-</div>
+                <div></div>
+            </div>
+        </div>
         <div class="warning-bar">
-            ⚠️ 이 프로그램은 <strong>관리자 권한</strong>으로 실행해야 합니다. ARP 스푸핑을 통해 기기의 인터넷을 차단/해제합니다.
+            <span class="warn-icon"></span>
+            이 프로그램은 <strong>관리자 권한</strong>으로 실행해야 합니다. ARP 스푸핑을 통해 기기의 인터넷을 차단/해제합니다.
         </div>
         <div class="toolbar">
             <button class="btn btn-scan" id="scanBtn" onclick="app.scan()">
@@ -247,13 +525,23 @@
             </thead>
             <tbody id="deviceList">
                 <tr><td colspan="4" class="empty-state">
-                    <div class="emoji">🔍</div>
+                    <div class="icon-placeholder"></div>
                     <p>네트워크 스캔을 클릭하여 기기를 검색하세요</p>
                 </td></tr>
             </tbody>
         </table>
     </div>
     <div class="toast" id="toast"></div>
+    <div class="detail-overlay" id="detailOverlay"></div>
+    <div class="detail-panel" id="detailPanel">
+        <div class="detail-header">
+            <h2 id="detailTitle">기기 정보</h2>
+            <button class="detail-close" id="detailClose">ESC</button>
+        </div>
+        <div class="detail-body" id="detailBody">
+            <div class="detail-spinner"><div class="spinner"></div></div>
+        </div>
+    </div>
     <script src="app.js"></script>
 </body>
 </html>

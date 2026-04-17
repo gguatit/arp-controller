@@ -12,7 +12,9 @@ interface ScanResponse {
 interface StatusResponse {
     blocked: Record<string, { blocked: boolean; duration: number }>;
     gateway: string;
+    gateway_mac: string;
     local_ip: string;
+    local_mac: string;
 }
 
 interface ActionResponse {
@@ -21,9 +23,22 @@ interface ActionResponse {
     error?: string;
 }
 
+interface DeviceDetailResponse {
+    ip: string;
+    mac: string;
+    hostname: string;
+    vendor: string;
+    os_guess: string;
+    ttl: number | null;
+    rtt: number | null;
+    blocked_info: { blocked: boolean; duration: number } | null;
+    device_type: string;
+}
+
 class ARPControllerApp {
     private devices: Device[] = [];
     private scanning: boolean = false;
+    private detailOpen: boolean = false;
 
     private escapeHtml(str: string): string {
         const div = document.createElement("div");
@@ -33,6 +48,33 @@ class ARPControllerApp {
 
     constructor() {
         this.loadStatus();
+        this.setupDetailClose();
+    }
+
+    private setupDetailClose(): void {
+        const overlay = document.getElementById("detailOverlay");
+        const closeBtn = document.getElementById("detailClose");
+        if (overlay) overlay.addEventListener("click", () => this.closeDetail());
+        if (closeBtn) closeBtn.addEventListener("click", () => this.closeDetail());
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && this.detailOpen) this.closeDetail();
+        });
+    }
+
+    private openDetail(): void {
+        const overlay = document.getElementById("detailOverlay");
+        const panel = document.getElementById("detailPanel");
+        if (overlay) overlay.classList.add("active");
+        if (panel) panel.classList.add("active");
+        this.detailOpen = true;
+    }
+
+    private closeDetail(): void {
+        const overlay = document.getElementById("detailOverlay");
+        const panel = document.getElementById("detailPanel");
+        if (overlay) overlay.classList.remove("active");
+        if (panel) panel.classList.remove("active");
+        this.detailOpen = false;
     }
 
     private async fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
@@ -108,13 +150,81 @@ class ARPControllerApp {
     async loadStatus(): Promise<void> {
         try {
             const data = await this.fetchJSON<StatusResponse>("/api/status");
-            const localEl = document.getElementById("localInfo");
-            const gwEl = document.getElementById("gatewayInfo");
-            if (localEl) localEl.textContent = `로컬: ${data.local_ip || "-"}`;
-            if (gwEl) gwEl.textContent = `게이트웨이: ${data.gateway || "-"}`;
+            const myIp = document.getElementById("myIp");
+            const myMac = document.getElementById("myMac");
+            const myGwIp = document.getElementById("myGwIp");
+            const myGwMac = document.getElementById("myGwMac");
+            if (myIp) myIp.textContent = data.local_ip || "-";
+            if (myMac) myMac.textContent = data.local_mac || "-";
+            if (myGwIp) myGwIp.textContent = data.gateway || "-";
+            if (myGwMac) myGwMac.textContent = data.gateway_mac || "-";
         } catch {
             // server may not be ready
         }
+    }
+
+    async showDeviceDetail(ip: string): Promise<void> {
+        this.openDetail();
+        const title = document.getElementById("detailTitle");
+        const body = document.getElementById("detailBody");
+        if (title) title.textContent = ip;
+        if (body) body.innerHTML = '<div class="detail-spinner"><div class="spinner"></div></div>';
+
+        try {
+            const data = await this.fetchJSON<DeviceDetailResponse>(`/api/device?ip=${encodeURIComponent(ip)}`);
+            if (body) body.innerHTML = this.renderDetail(data);
+        } catch (err) {
+            if (body) body.innerHTML = `<div class="detail-row"><div class="detail-val">조회 실패: ${(err as Error).message}</div></div>`;
+        }
+    }
+
+    private renderDetail(d: DeviceDetailResponse): string {
+        const fmtDuration = (sec: number): string => {
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            if (m > 60) return `${Math.floor(m / 60)}시간 ${m % 60}분`;
+            if (m > 0) return `${m}분 ${s}초`;
+            return `${s}초`;
+        };
+
+        return `
+            <div class="detail-row">
+                <span class="detail-key">기기 유형</span>
+                <span class="detail-val highlight">${this.escapeHtml(d.device_type)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">IP 주소</span>
+                <span class="detail-val highlight">${this.escapeHtml(d.ip)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">MAC 주소</span>
+                <span class="detail-val mono">${this.escapeHtml(d.mac)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">호스트명</span>
+                <span class="detail-val">${d.hostname ? this.escapeHtml(d.hostname) : "-"}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">제조사</span>
+                <span class="detail-val">${d.vendor ? this.escapeHtml(d.vendor) : "-"}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">OS 추정</span>
+                <span class="detail-val">${this.escapeHtml(d.os_guess)}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">TTL</span>
+                <span class="detail-val">${d.ttl !== null ? d.ttl : "-"}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">응답 시간</span>
+                <span class="detail-val">${d.rtt !== null ? d.rtt.toFixed(1) + " ms" : "-"}</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-key">차단 상태</span>
+                <span class="detail-val">${d.blocked_info ? "차단됨 (" + fmtDuration(d.blocked_info.duration) + ")" : "연결됨"}</span>
+            </div>
+        `;
     }
 
     render(): void {
@@ -125,7 +235,7 @@ class ARPControllerApp {
 
         if (this.devices.length === 0) {
             tbody.innerHTML = `<tr><td colspan="4" class="empty-state">
-                <div class="emoji">🔍</div>
+                <div class="icon-placeholder"></div>
                 <p>네트워크 스캔을 클릭하여 기기를 검색하세요</p>
             </td></tr>`;
             return;
@@ -133,7 +243,7 @@ class ARPControllerApp {
 
         tbody.innerHTML = this.devices.map(d => `
             <tr class="${d.blocked ? "blocked" : ""}">
-                <td class="ip-cell">${this.escapeHtml(d.ip)}</td>
+                <td class="ip-cell" onclick="app.showDeviceDetail('${this.escapeHtml(d.ip)}')">${this.escapeHtml(d.ip)}${d.hostname ? `<span class="hostname-label">${this.escapeHtml(d.hostname)}</span>` : ""}</td>
                 <td class="mac-cell">${this.escapeHtml(d.mac)}</td>
                 <td>
                     <span class="status-badge ${d.blocked ? "status-blocked" : "status-online"}">
